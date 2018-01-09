@@ -1,6 +1,7 @@
 from urllib.request import urlopen, URLError
 from bs4 import BeautifulSoup
 from datetime import datetime
+import pandas as pd
 
 
 class Stock:
@@ -74,7 +75,7 @@ def get_stock(stock_code, history=None):
     stock.volume = int(src[3].text.strip().replace(',', ''))
     stock.low = int(src[5].text.strip().replace(',', ''))
     src = html.find('div', {'class': 'rate_info'})
-    stock.name = src.find('dt').text.strip()
+    stock.name = src.find('dt').text.strip().replace(';', '')
     src = src.find('span', {'class': 'blind'}).text
     stock.price = int(src.strip().replace(',', ''))
     # parse PER (WISEfn)
@@ -122,3 +123,52 @@ def get_stock(stock_code, history=None):
             data['volume'] = int(src[6].text.strip().replace(',', ''))
             # append to the 'stock' class
             stock.history.append(data)
+
+
+def read_KOSPI():
+
+    url = "http://finance.naver.com/sise/sise_market_sum.nhn?sosok=0&page={}"
+    data = []
+    for page in range(1, 1000):
+        html = urlopen(url.format(page))
+        html = BeautifulSoup(html.read().decode('euc-kr'), 'html.parser')
+        html = html.find('tbody')
+        if len(html) == 3:
+            break
+
+        for src in html.find_all('tr'):
+            # ignore border rows
+            if len(src) == 1:
+                continue
+
+            item = {}
+            item['Rank'] = int(src.find('td', {'class': 'no'}).text)
+            item['Name'] = str(src.find('a').text.strip().replace(';', ''))
+            item['Code'] = src.find('a')['href'].split('=')[1].strip()
+            nums = src.find_all('td', {'class': 'number'})
+            item['Price'] = int(nums[0].text.strip().replace(',', ''))
+            item['Change'] = nums[2].text.strip()
+            item['Volume'] = int(nums[4].text.strip().replace(',', ''))
+            item['Market Cap'] = int(nums[4].text.strip().replace(',', ''))
+            per = nums[8].text.strip().replace(',', '')
+            item['PER'] = float(per) if per != 'N/A' else None
+            roe = nums[9].text.strip().replace(',', '')
+            item['ROE'] = float(roe) if roe != 'N/A' else None
+
+            data.append(item)
+        print('[*] page {} complete.'.format(page))
+
+    df = pd.DataFrame(data, columns=['Rank',
+                                     'Name',
+                                     # 'Code',
+                                     'Price',
+                                     'Change',
+                                     'Market Cap',
+                                     'Volume',
+                                     'PER',
+                                     'ROE'])
+
+    return df
+    
+    # df.to_csv('KOSPI_{}.csv'.format(
+    #     datetime.now().strftime("%y-%m-%d-%H-%M")), index=False)
