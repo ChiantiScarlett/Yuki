@@ -4,6 +4,14 @@ from datetime import datetime
 import pandas as pd
 
 
+class Error(Exception):
+    def __init__(self, message):
+        self.message = message
+
+    def __str__(self):
+        return self.message
+
+
 class Stock:
     """
     name : name of the corporation
@@ -85,13 +93,19 @@ def get_stock(stock_code, history=None):
     src = html.find('table', {'class': 'lwidth'}).find_all('td')[2].text
     stock.foreign_rate = src
 
-    # if History is set, parse historical data of the item
+    # if History is not set return data
     if history is None:
         return stock
-    # convert start_date, end_date into comparable string
-    START_DATE, END_DATE = map(
-        lambda x: datetime.strptime(str(x), '%Y%m%d').strftime('%Y.%m.%d'),
-        history)
+    # else if History is tuple, parse date
+    if type(history) == tuple:
+        # convert start_date, end_date into comparable string
+        START_DATE, END_DATE = map(
+            lambda x: datetime.strptime(str(x), '%Y%m%d').strftime('%Y.%m.%d'),
+            history)
+
+    if type(history) == int:
+        COUNTER = history
+
     # start_parsing
     url = "http://finance.naver.com/item/sise_day.nhn?code={code}&page={page}"
     for page in range(1, 100000):
@@ -107,12 +121,20 @@ def get_stock(stock_code, history=None):
             # if invalid span(including horizon border, etc), skip.
             if len(src) == 0:
                 continue
-            # if date is out of range, skip.
-            if src[0].text.strip() > END_DATE:
-                continue
-            # if date is out of range, stop and return stock
-            if src[0].text.strip() < START_DATE:
-                return stock
+
+            if type(history) == tuple:
+                # if date is out of range, skip.
+                if src[0].text.strip() > END_DATE:
+                    continue
+                # if date is out of range, stop and return stock
+                if src[0].text.strip() < START_DATE:
+                    return stock
+            elif type(history) == int:
+                if COUNTER <= 0:
+                    return stock
+                else:
+                    COUNTER -= 1
+
             # else parse data
             data = {}
             data['date'] = src[0].text.strip()
@@ -169,6 +191,6 @@ def read_KOSPI():
                                      'ROE'])
 
     return df
-    
+
     # df.to_csv('KOSPI_{}.csv'.format(
     #     datetime.now().strftime("%y-%m-%d-%H-%M")), index=False)
