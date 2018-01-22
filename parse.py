@@ -1,3 +1,5 @@
+from suzaku.error import Error
+from suzaku.tools import TODAY
 from urllib.request import urlopen, URLError
 from bs4 import BeautifulSoup
 from datetime import datetime
@@ -7,47 +9,47 @@ from tabulate import tabulate
 pd.set_option('display.expand_frame_repr', False)
 
 
-class Error(Exception):
-    def __init__(self, message):
-        self.message = message
+class Stock:
+    """ Class for parsing basic stock data.
 
-    def __str__(self):
-        return "[*] {}".format(self.message)
+    This class parses finance data from finance.naver.com, based on the code
+    of a stock. Since this module highly relies on parsing web languages,
+    be aware of its fragility regarding any structual updates on the web page.
 
 
-class _Stock:
-    """
-    name : name of the corporation
-    code : stock code of the corporation
-    timestamp : Parsed date/time
-    price : current price
-    open : open price
-    high : highest price
-    low : lowest price
-    volume : trade volume
-    market : market area (KOSPI or KOSDAQ)
-    rank : rank of the stock in the market
-    PER : PER (WISEfn)
-    foreign_rate : Foreign Consumption Rate
     """
 
     def __init__(self, code):
-        self.name = None
-        self.code = code
-        self.price = None
-        self.timestamp = None
-        self.open = None
-        self.high = None
-        self.low = None
-        self.volume = None
-        self.market = None
-        self.rank = None
-        self.PER = None
-        self.foreign_rate = None
+        """
+
+        Args:
+            code (str): A code that represents the stock item.
+
+        """
+
+        self.code = code  # (str): Code of the company
+        self.name = None  # (str): Name of the company
+        self.market = None  # (str): Which market it belongs (KOSPI or KOSDAQ)
+        self.rank = None  # (int): Rank within the market (KOSPI or KOSDAQ)
+        self.PER = None  # (float): PER of the company (WISEfn)
+        self.foreign_rate = None  # Foreign consumption rate of total stock
+
+        self.timestamp = None  # (str): Timestamp of time the data was parsed
+        self.price = None  # (int): Current price / End price of the day
+        self.open = None  # (int): Open price of the day
+        self.high = None  # (int): Highest price of the day
+        self.low = None  # (int): Lowest price of the day
+        self.volume = None  # (int): Trade volume of the day
 
         self.get_stock(code=self.code)
 
     def __str__(self):
+        """ Custom defined member for printing out general data of the stock.
+
+        This is typically defined for printing out current class data in an
+        interactive Python shell or iPython.
+
+        """
 
         return_str = "[{name}] ({market}, {code})\n" +\
                      "<{timestamp}>\n" +\
@@ -73,27 +75,33 @@ class _Stock:
         src = html.find('div', {'class': 'first'}).find_all('tr')[1]
         src = src.find('td').text
         m_name = {'코스피': 'KOSPI', '코스닥': 'KOSDAQ'}
-        self.market = m_name[src.split()[0]]
-        self.rank = int(src.split()[1][:-1])
-        # parse timestamp
-        src = html.find('em', {'class': 'date'}).text.strip().split()
-        self.timestamp = " ".join(src[:2])
-        # parse open, high, volume, low, price, name
-        src = html.find('table').find_all('span', {'class': 'blind'})
-        self.open = int(src[4].text.strip().replace(',', ''))
-        self.high = int(src[1].text.strip().replace(',', ''))
-        self.volume = int(src[3].text.strip().replace(',', ''))
-        self.low = int(src[5].text.strip().replace(',', ''))
-        src = html.find('div', {'class': 'rate_info'})
-        self.name = src.find('dt').text.strip().replace(';', '')
-        src = src.find('span', {'class': 'blind'}).text
-        self.price = int(src.strip().replace(',', ''))
-        # parse PER (WISEfn)
-        src = html.find('table', {'class': 'per_table'})
-        self.PER = float(src.find_all('tbody')[0].find('td').find('em').text)
-        # parse Foreign Consumption Rate
-        src = html.find('table', {'class': 'lwidth'}).find_all('td')[2].text
-        self.foreign_rate = src
+        try:
+            self.market = m_name[src.split()[0]]
+            self.rank = int(src.split()[1][:-1])
+            # parse timestamp
+            src = html.find('em', {'class': 'date'}).text.strip().split()
+            self.timestamp = " ".join(src[:2])
+            # parse open, high, volume, low, price, name
+            src = html.find('table').find_all('span', {'class': 'blind'})
+            self.open = int(src[4].text.strip().replace(',', ''))
+            self.high = int(src[1].text.strip().replace(',', ''))
+            self.volume = int(src[3].text.strip().replace(',', ''))
+            self.low = int(src[5].text.strip().replace(',', ''))
+            src = html.find('div', {'class': 'rate_info'})
+            self.name = src.find('dt').text.strip().replace(';', '')
+            src = src.find('span', {'class': 'blind'}).text
+            self.price = int(src.strip().replace(',', ''))
+            # parse PER (WISEfn)
+            src = html.find('table', {'class': 'per_table'})
+            self.PER = src.find_all('tbody')[0].find('td').find('em').text
+            self.PER = float(self.PER.replace(',', ''))
+            # parse Foreign Consumption Rate
+            src = html.find('table', {'class': 'lwidth'}
+                            ).find_all('td')[2].text
+            self.foreign_rate = src
+        except:
+            print("[*] WARNING .. ITEM SKIP OCCURED.")
+            pass
 
     def _history(self, *args):
         """
@@ -106,6 +114,8 @@ class _Stock:
             COUNTER = args[0]
         # else if arg == tuple, parse date from it
         elif len(args) == 2:
+            # check if TODAY == END_DATE
+            TODAY_INCLUDED = True if TODAY == args[1] else False
             # convert start_date, end_date into comparable string
             try:
                 START_DATE, END_DATE = map(
@@ -116,12 +126,39 @@ class _Stock:
         else:
             raise Error("arg must be either int() or tuple().")
 
+        history_list = []
+
+        # since history doesn't include today's stock data,
+        # confirm if today is included & add.
+        if TODAY_INCLUDED:
+            data = {}
+            data['Date'] = "{}-{}-{}".format(TODAY[:4], TODAY[4:6], TODAY[6:8])
+            data['End'] = self.price
+            data['Start'] = self.open
+            data['High'] = self.high
+            data['Low'] = self.low
+            data['Volume'] = self.volume
+            try:
+                data['HL_Gap'] = (
+                    data['High'] - data['Low']) / data['Start']
+                data['HL_Gap'] = 100 * data['HL_Gap']
+            except ZeroDivisionError:
+                data['HL_Gap'] = 0
+            try:
+                data['Change'] = (
+                    data['End'] - data['Start']) / data['Start']
+                data['Change'] = 100 * data['Change']
+            except ZeroDivisionError:
+                data['Change'] = 0
+
+            history_list.append(data)
+
         # parse start.
         # start_parsing
         url = \
             "http://finance.naver.com/item/sise_day.nhn?" +\
             "code={code}&page={page}"
-        history_list = []
+
         page = 1
         while True:
             try:
@@ -153,16 +190,24 @@ class _Stock:
 
                 # else parse data
                 data = {}
-                data['Date'] = src[0].text.strip()
+                data['Date'] = src[0].text.strip().replace('.', '-')
                 data['End'] = int(src[1].text.strip().replace(',', ''))
                 data['Start'] = int(src[3].text.strip().replace(',', ''))
                 data['High'] = int(src[4].text.strip().replace(',', ''))
                 data['Low'] = int(src[5].text.strip().replace(',', ''))
                 data['Volume'] = int(src[6].text.strip().replace(',', ''))
-                data['HL_Gap'] = (data['High'] - data['Low']) / data['Start']
-                data['HL_Gap'] = 100 * data['HL_Gap']
-                data['SE_Gap'] = (data['Start'] - data['End']) / data['Start']
-                data['SE_Gap'] = 100 * data['SE_Gap']
+                try:
+                    data['HL_Gap'] = (
+                        data['High'] - data['Low']) / data['Start']
+                    data['HL_Gap'] = 100 * data['HL_Gap']
+                except ZeroDivisionError:
+                    data['HL_Gap'] = 0
+                try:
+                    data['Change'] = (
+                        data['End'] - data['Start']) / data['Start']
+                    data['Change'] = 100 * data['Change']
+                except ZeroDivisionError:
+                    data['Change'] = 0
                 # append to the 'stock' class
                 history_list.append(data)
             page += 1
@@ -175,7 +220,7 @@ class _Stock:
                                                 'Low',
                                                 'End',
                                                 'HL_Gap',
-                                                'SE_Gap',
+                                                'Change',
                                                 'Volume']))
 
     def compare(self, *args):
@@ -240,10 +285,10 @@ class _Market:
         pass
 
     def KOSPI(self, top=None):
-        return self._read_KOSPI_KOSDAQ(index=1, top=top)
+        return self._read_KOSPI_KOSDAQ(index=0, top=top)
 
     def KOSDAQ(self, top=None):
-        return self._read_KOSPI_KOSDAQ(index=0, top=top)
+        return self._read_KOSPI_KOSDAQ(index=1, top=top)
 
     def _read_KOSPI_KOSDAQ(self, index, top):
         url = \
@@ -310,5 +355,5 @@ class _Market:
 
         return DataObject(df)
 
-        # df.to_csv('KOSPI_{}.csv'.format(
-        #     datetime.now().strftime("%y-%m-%d-%H-%M")), index=False)
+
+Market = _Market()
