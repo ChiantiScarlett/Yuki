@@ -3,6 +3,7 @@ import numpy as np
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from suzaku.error import Error
+from tabulate import tabulate
 
 
 def _TODAY():
@@ -44,3 +45,7 @@ def reject_outliers(data, m=2):
     mdev = np.median(d)
     s = d / mdev if mdev else 0
     return data[s < m]
+
+
+def dprint(df):
+    print(tabulate(df, headers='keys'))

@@ -1,10 +1,8 @@
-from suzaku.error import Error
-from suzaku.tools import TODAY
 from urllib.request import urlopen, URLError
 from bs4 import BeautifulSoup
 from datetime import datetime
 import pandas as pd
-from tabulate import tabulate
+import logging
 
 pd.set_option('display.expand_frame_repr', False)
 
@@ -32,7 +30,7 @@ class Stock:
         self.market = None  # (str): Which market it belongs (KOSPI or KOSDAQ)
         self.rank = None  # (int): Rank within the market (KOSPI or KOSDAQ)
         self.PER = None  # (float): PER of the company (WISEfn)
-        self.foreign_rate = None  # Foreign consumption rate of total stock
+        self.foreign_rate = None  # (float): Foreign consumption rate of stock
 
         self.timestamp = None  # (str): Timestamp of time the data was parsed
         self.price = None  # (int): Current price / End price of the day
@@ -65,23 +63,45 @@ class Stock:
                                  open=self.open, volume=self.volume)
 
     def get_stock(self, code):
-        url = \
-            "http://finance.naver.com/item/sise.nhn?" +\
-            "code={}".format(code)
-        html = BeautifulSoup(
-            urlopen(url).read().decode('euc-kr'), 'html.parser')
+        """ Parse stock data from finance.naver.com
 
-        # parse market and rank
+        This method is executed on class initialization. It updates the
+        following attributes:
+
+        self.name (str): Name of the company
+        self.market (str): Which market it belongs (KOSPI or KOSDAQ)
+        self.rank (int): Rank within the market (KOSPI or KOSDAQ)
+        self.PER (float): PER of the company (WISEfn)
+        self.foreign_rate (float): Foreign consumption rate of stock
+
+        self.timestamp (str): Timestamp of time the data was parsed
+        self.price (int): Current price / End price of the day
+        self.open (int): Open price of the day
+        self.high (int): Highest price of the day
+        self.low (int): Lowest price of the day
+        self.volume (int): Trade volume of the day
+
+        Args:
+            code (str): A code that represents the stock item.
+
+        """
+
+        # Prepare parsed html form from `finance.naver.com`
+        url = "http://finance.naver.com/item/sise.nhn?code={}"
+        html = urlopen(url.format(code)).read().decode('euc-kr')
+        html = BeautifulSoup(html, 'html.parser')
+
+        # Trim down to the core source of data
         src = html.find('div', {'class': 'first'}).find_all('tr')[1]
         src = src.find('td').text
-        m_name = {'코스피': 'KOSPI', '코스닥': 'KOSDAQ'}
         try:
-            self.market = m_name[src.split()[0]]
+            # Find market, rank, and timestamp
+            self.market = {'코스피': 'KOSPI', '코스닥': 'KOSDAQ'}[src.split()[0]]
             self.rank = int(src.split()[1][:-1])
-            # parse timestamp
             src = html.find('em', {'class': 'date'}).text.strip().split()
             self.timestamp = " ".join(src[:2])
-            # parse open, high, volume, low, price, name
+
+            # Find open, high, volume, low, name, and current price
             src = html.find('table').find_all('span', {'class': 'blind'})
             self.open = int(src[4].text.strip().replace(',', ''))
             self.high = int(src[1].text.strip().replace(',', ''))
@@ -91,269 +111,195 @@ class Stock:
             self.name = src.find('dt').text.strip().replace(';', '')
             src = src.find('span', {'class': 'blind'}).text
             self.price = int(src.strip().replace(',', ''))
-            # parse PER (WISEfn)
+
+            # parse PER (WISEfn) and foreign consumption rate
             src = html.find('table', {'class': 'per_table'})
             self.PER = src.find_all('tbody')[0].find('td').find('em').text
             self.PER = float(self.PER.replace(',', ''))
-            # parse Foreign Consumption Rate
-            src = html.find('table', {'class': 'lwidth'}
-                            ).find_all('td')[2].text
-            self.foreign_rate = src
-        except:
-            print("[*] WARNING .. ITEM SKIP OCCURED.")
-            pass
+            src = html.find('table', {'class': 'lwidth'})
+            self.foreign_rate = src.find_all('td')[2].text
 
-    def _history(self, *args):
+        except Exception:
+            # In case if the stock data is corrupted, stop parsing and escape
+            message = "The stock data of [{}] seems to be incomplete."
+            logging.critical(message.format(code))
+
+    def history(self, start_date, end_date):
+        """ Parse stock historical data from finance.naver.com
+
+        This method parses historical data based on a range of date.
+
+        Args:
+            start_date (str): YYYYDDMM | The first day of the output
+            end_date (str): YYYYDDMM | The last day of the output
+
+        Returns:
+            pandas.DataFrame object with the following columns:
+
+            Date (str): Name of the company
+            Start (int): Start price of the day
+            High (int): Highest price of the day
+            Low (int): Lowest price of the day
+            End (int): End price of the day
+            HL_Gap (float): (High - Low) / Start
+            Change (float): (End - Start) / Start
+            Volume (int): Trade volume of the day
         """
-        get history of the stock.
 
-        """
+        # Validate start_date, end_date, and convert into comparable format
+        try:
+            dates = [start_date, end_date]
+            for index in range(len(dates)):
+                dates[index] = datetime.strptime(str(dates[index]), "%Y%m%d")
+                dates[index] = dates[index].strftime('%Y.%m.%d')
+        except IndexError:
+            msg = "start_date, end_date parameters must be YYYYMMDD format."
+            raise TypeError(msg)
+        start_date, end_date = dates
 
-        # if arg == int, parse history by the amount of arg
-        if len(args) == 1 and type(args[0]) == int:
-            COUNTER = args[0]
-        # else if arg == tuple, parse date from it
-        elif len(args) == 2:
-            # check if TODAY == END_DATE
-            TODAY_INCLUDED = True if TODAY == args[1] else False
-            # convert start_date, end_date into comparable string
-            try:
-                START_DATE, END_DATE = map(
-                    lambda x: datetime.strptime(
-                        str(x), '%Y%m%d').strftime('%Y.%m.%d'), args)
-            except IndexError:
-                raise Error("tuple arg must be (YYYYMMDD,YYYYMMDD) format.")
-        else:
-            raise Error("arg must be either int() or tuple().")
-
+        # Create history_list, which will include histories within iterations
         history_list = []
 
-        # since history doesn't include today's stock data,
-        # confirm if today is included & add.
-        if TODAY_INCLUDED:
+        # If today is included in the date range and market has been opened,
+        # manually append today's stock data
+        today = datetime.now().strftime("%Y.%m.%d")
+        if today <= end_date and self.open is not None:
             data = {}
-            data['Date'] = "{}-{}-{}".format(TODAY[:4], TODAY[4:6], TODAY[6:8])
+            data['Date'] = today
             data['End'] = self.price
-            data['Start'] = self.open
+            data['Open'] = self.open
             data['High'] = self.high
             data['Low'] = self.low
             data['Volume'] = self.volume
-            try:
-                data['HL_Gap'] = (
-                    data['High'] - data['Low']) / data['Start']
-                data['HL_Gap'] = 100 * data['HL_Gap']
-            except ZeroDivisionError:
-                data['HL_Gap'] = 0
-            try:
-                data['Change'] = (
-                    data['End'] - data['Start']) / data['Start']
-                data['Change'] = 100 * data['Change']
-            except ZeroDivisionError:
-                data['Change'] = 0
-
+            data['HL_Gap'] = \
+                100 * (self.high - self.low) / self.open if self.open else 0
+            data['Change'] = \
+                100 * (self.price - self.open) / self.open if self.open else 0
             history_list.append(data)
 
-        # parse start.
-        # start_parsing
-        url = \
-            "http://finance.naver.com/item/sise_day.nhn?" +\
-            "code={code}&page={page}"
-
+        # Prepare html form parser.
+        url = "http://finance.naver.com/item/sise_day.nhn?code={}&page={}"
         page = 1
-        while True:
+        break_flag = False
+        while not break_flag:
             try:
-                html = urlopen(url.format(code=self.code, page=page))
-                html = BeautifulSoup(
-                    html.read().decode('euc-kr'), 'html.parser')
-            # if data page is out of range, stop and return stock class
+                html = urlopen(url.format(self.code, page)).read()
+                html = BeautifulSoup(html.decode('euc-kr'), 'html.parser')
             except URLError:
-                return history_list
-            # parse each row
+                # If page no longer exists, break the while loop
+                break_flag = True
+                continue
+
+            # Trim down to specific data chunk
             for row in html.find_all('tr')[3:]:
                 src = row.find_all('span')
-                # if invalid span(including horizon border, etc), skip.
+                # Skip unnecessary span(horizon border, etc)
                 if len(src) == 0:
                     continue
+                # Skip data until it goes below the end_date
+                if src[0].text.strip() > end_date:
+                    continue
+                # If the date goes below the start_date, break the while loop
+                if src[0].text.strip() < start_date:
+                    break_flag = True
+                    break
 
-                if len(args) == 2:
-                    # if date is out of range, skip.
-                    if src[0].text.strip() > END_DATE:
-                        continue
-                    # if date is out of range, stop and return stock
-                    if src[0].text.strip() < START_DATE:
-                        return history_list
-                elif len(args) == 1:
-                    if COUNTER <= 0:
-                        return history_list
-                    else:
-                        COUNTER -= 1
-
-                # else parse data
+                # Else, parse and add data
                 data = {}
                 data['Date'] = src[0].text.strip().replace('.', '-')
                 data['End'] = int(src[1].text.strip().replace(',', ''))
-                data['Start'] = int(src[3].text.strip().replace(',', ''))
+                data['Open'] = int(src[3].text.strip().replace(',', ''))
                 data['High'] = int(src[4].text.strip().replace(',', ''))
                 data['Low'] = int(src[5].text.strip().replace(',', ''))
                 data['Volume'] = int(src[6].text.strip().replace(',', ''))
-                try:
-                    data['HL_Gap'] = (
-                        data['High'] - data['Low']) / data['Start']
-                    data['HL_Gap'] = 100 * data['HL_Gap']
-                except ZeroDivisionError:
-                    data['HL_Gap'] = 0
-                try:
-                    data['Change'] = (
-                        data['End'] - data['Start']) / data['Start']
-                    data['Change'] = 100 * data['Change']
-                except ZeroDivisionError:
-                    data['Change'] = 0
-                # append to the 'stock' class
+                data['Change'] = \
+                    100 * (data['End'] - data['Open']) / data['Open'] \
+                    if data['Open'] else 0
+                data['HL_Gap'] = \
+                    100 * (data['High'] - data['Low']) / data['Open'] \
+                    if data['Open'] else 0
+
                 history_list.append(data)
+
             page += 1
 
-    def history(self, *args):
-        return DataObject(pd.DataFrame(self._history(*args),
-                                       columns=['Date',
-                                                'Start',
-                                                'High',
-                                                'Low',
-                                                'End',
-                                                'HL_Gap',
-                                                'Change',
-                                                'Volume']))
-
-    def compare(self, *args):
-        # args = (DATE1, DATE2)
-        # DATE1 must be prior to DATE2
-        history_list = self.history(*args)
-        print(history_list[0])
-        print(history_list[-1])
+        # Return data
+        return pd.DataFrame(history_list, columns=['Date',
+                                                   'Open',
+                                                   'High',
+                                                   'Low',
+                                                   'End',
+                                                   'HL_Gap',
+                                                   'Change',
+                                                   'Volume'])
 
 
-class DataObject:
-    def __init__(self, df):
-        self.df = df
+def capture(market, top=None):
+    # Raise error if market is not KOSPI nor KOSDAQ
+    market_keys = {'KOSPI': '0', 'KOSDAQ': '1'}
+    if market.upper() not in market_keys:
+        raise ValueError("Market should be either 'KOSPI' or 'KOSDAQ'.")
 
-    def show(self, **kwargs):
-        # print item
-        # check parameter
-        df = None
-        try:
-            # if no option, show pure dataframe
-            if len(kwargs.keys()) == 0:
-                df = self.df
-            # if multiple options are set, raise Error
-            elif len(kwargs.keys()) > 1:
-                raise Error("Only one paramter is allowed in this method.")
-            # top
-            elif 'top' in kwargs.keys():
-                df = self.df[:kwargs['top']]
-            # bottom
-            elif 'bottom' in kwargs.keys():
-                df = self.df[-kwargs['bottom']:]
-            # date
-            elif 'date' in kwargs.keys():
-                try:
-                    START_DATE, END_DATE = map(
-                        lambda x: datetime.strptime(
-                            str(x), '%Y%m%d').strftime('%Y.%m.%d'),
-                        kwargs['date'])
-                except IndexError:
-                    raise Error(
-                        "tuple arg must be (YYYYMMDD,YYYYMMDD) format.")
+    # Validate arguments
+    if top is not None and type(top) != int:
+        raise TypeError("'top' should be an <int> type number.")
+    if top < 1:
+        raise ValueError("'top' should be greater than 0.")
 
-                df = self.df[START_DATE < self.df['Date']]
-                df = df[df['Date'] < END_DATE]
-            else:
-                raise Error("Invalid key '{}'".format(kwargs[0]))
-        except IndexError:
-            raise Error("Invalid parameter.")
+    # Start parsing
+    url = "http://finance.naver.com/sise/sise_market_sum.nhn?sosok="
+    url += market_keys[market.upper()]
+    page = 1
+    data = []  # A variable that holds every stock data chunks
+    break_flag = False  # Flag used for escaping loop
 
-        print(tabulate(df, headers='keys'))
+    while not break_flag:
+        html = urlopen(url + '&page={}'.format(page))
+        html = BeautifulSoup(html.read().decode('euc-kr'), 'html.parser')
+        html = html.find('tbody')
 
-    def sort(self, key, ascending=False):
-        self.df = self.df.sort_values(by=key, ascending=ascending)
+        # When meets the last page of stock list, escape while-loop
+        if len(html) == 3:
+            break_flag = True
+            break
 
-    def ndarray(self, key):
-        return self.df[key].values
+        # Else parse data from each line, and save them into 'data'.
+        for src in html.find_all('tr'):
+            # Skip border rows
+            if len(src) == 1:
+                continue
 
+            # Parse data
+            item = {}
+            item['Rank'] = int(src.find('td', {'class': 'no'}).text)
+            item['Name'] = str(src.find('a').text.strip().replace(';', ''))
+            item['Code'] = str(src.find('a')['href'].split('=')[1])
+            nums = src.find_all('td', {'class': 'number'})
+            item['Price'] = int(nums[0].text.strip().replace(',', ''))
+            item['Change'] = float(nums[2].text.strip()[:-1])
+            item['Volume'] = int(nums[4].text.strip().replace(',', ''))
+            item['Market Cap'] = int(nums[4].text.strip().replace(',', ''))
+            per = nums[8].text.strip().replace(',', '')
+            item['PER'] = float(per) if per != 'N/A' else None
+            roe = nums[9].text.strip().replace(',', '')
+            item['ROE'] = float(roe) if roe != 'N/A' else None
 
-class _Market:
-
-    def __init__(self):
-        pass
-
-    def KOSPI(self, top=None):
-        return self._read_KOSPI_KOSDAQ(index=0, top=top)
-
-    def KOSDAQ(self, top=None):
-        return self._read_KOSPI_KOSDAQ(index=1, top=top)
-
-    def _read_KOSPI_KOSDAQ(self, index, top):
-        url = \
-            "http://finance.naver.com/sise/sise_market_sum.nhn?" +\
-            "sosok={}&page={}"
-        data = []
-        page = 1
-        counter = 0
-        if top is None:
-            top = 999999
-        while True:
-            html = urlopen(url.format(index, page))
-            html = BeautifulSoup(html.read().decode('euc-kr'), 'html.parser')
-            html = html.find('tbody')
-            if len(html) == 3:
+            # Store data. If sufficient, escape the loop
+            data.append(item)
+            top -= 1
+            if not top:
+                break_flag = True
                 break
 
-            for src in html.find_all('tr'):
-                # ignore border rows
-                if len(src) == 1:
-                    continue
-
-                item = {}
-                item['Rank'] = int(src.find('td', {'class': 'no'}).text)
-                item['Name'] = str(src.find('a').text.strip().replace(';', ''))
-                item['Code'] = str(src.find('a')['href'].split('=')[1])
-                nums = src.find_all('td', {'class': 'number'})
-                item['Price'] = int(nums[0].text.strip().replace(',', ''))
-                item['Change'] = float(nums[2].text.strip()[:-1])
-                item['Volume'] = int(nums[4].text.strip().replace(',', ''))
-                item['Market Cap'] = int(nums[4].text.strip().replace(',', ''))
-                per = nums[8].text.strip().replace(',', '')
-                item['PER'] = float(per) if per != 'N/A' else None
-                roe = nums[9].text.strip().replace(',', '')
-                item['ROE'] = float(roe) if roe != 'N/A' else None
-
-                data.append(item)
-                counter += 1
-                # break if counter meets top
-                if counter == top:
-                    df = pd.DataFrame(data, columns=['Rank',
-                                                     'Code',
-                                                     'Name',
-                                                     'Price',
-                                                     'Change',
-                                                     'Market Cap',
-                                                     'Volume',
-                                                     'PER',
-                                                     'ROE'])
-                    return DataObject(df)
-
-            print('[*] page {} complete.'.format(page))
-            page += 1
-
-        df = pd.DataFrame(data, columns=['Rank',
-                                         'Code',
-                                         'Name',
-                                         'Price',
-                                         'Change',
-                                         'Market Cap',
-                                         'Volume',
-                                         'PER',
-                                         'ROE'])
-
-        return DataObject(df)
+    # Return pd.DataFrame object
+    return pd.DataFrame(data, columns=['Rank',
+                                       'Code',
+                                       'Name',
+                                       'Price',
+                                       'Change',
+                                       'Market Cap',
+                                       'Volume',
+                                       'PER',
+                                       'ROE'])
 
 
-Market = _Market()
