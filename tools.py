@@ -8,10 +8,32 @@ def _TODAY():
     return datetime.now().strftime("%Y%m%d")
 
 
-TODAY = _TODAY()
+TODAY = _TODAY()  # so as to use _TODAY() as a variable
 
 
 def PAST(**kwargs):
+    """ Returns relative date(YYYYMMDD) based on its keyword arguments.
+
+    This function is used for creating YYYYMMDD format string based on relative
+    days, months, or years. It simply subtracts adequate amounts of date from
+    the date of today, by the given parameter which can be `days`, `weeks',
+    `months`, or `years`.
+
+    Note:
+            Using multiple parameters is prohibited. Do not use `day`, `week`,
+            or other singular unit which can be easily mistaken.
+
+    Args:
+            days   (int):  Number of days to subtract from today
+            weeks  (int):  Number of weeks to subtract from today
+            months (int):  Number of months to subtract from today
+            years  (int):  Number of years to subtract from today
+
+    Returns:
+            date   (str):  A String that is in `YYYYMMDD` format
+
+    """
+
     if len(kwargs.keys()) != 1:
         raise TypeError("Must have one keyword as param: days, months, years")
 
@@ -36,7 +58,7 @@ def PAST(**kwargs):
 
 
 def reject_outliers(data, m=2):
-    """ Filter out [(Median(data) - m * σ(data), (Median(data) - m * σ(data)].
+    """ Returns data that meets [(Median - m * σ) < `data` < (Median - m * σ)]
 
     This function drops `outliers`, which are the data does not meet the
     specific criteria given as the parameter `m`.
@@ -48,8 +70,8 @@ def reject_outliers(data, m=2):
     Returns:
             data (pandas.DataFrame):  DataFrame without the outliers
 
-
     """
+
     d = np.abs(data - np.median(data))
     mdev = np.median(d)
     s = d / mdev if mdev else 0
@@ -67,9 +89,10 @@ def dprint(df):
 
     Args:
             df (pandas.DataFrame):  DataFrame object you want to print out
-    
+
     Returns:
             None
+
     """
 
     df.is_copy = False  # so as to avoid SettingWithCopyWarning
