@@ -2,6 +2,7 @@ from urllib.request import urlopen, URLError
 from bs4 import BeautifulSoup
 from datetime import datetime
 import pandas as pd
+import numpy as np
 import logging
 
 
@@ -79,6 +80,7 @@ class Stock:
         self.low          (int):   Lowest price of the day
         self.volume       (int):   Trade volume of the day
 
+
         Args:
             code          (str):   A code that represents the stock item.
 
@@ -129,14 +131,16 @@ class Stock:
 
         This method parses historical data based on a range of date.
 
+
         Args:
             start_date  (str):      YYYYDDMM | The first day of the output
             end_date    (str):      YYYYDDMM | The last day of the output
 
+
         Returns:
             pandas.DataFrame object with the following columns:
 
-            Date        (object):   Name of the company
+            Date        (object):   Date of each history data
             Open        (int64):    Open price of the day
             High        (int64):    Highest price of the day
             Low         (int64):    Lowest price of the day
@@ -188,7 +192,7 @@ class Stock:
             except URLError:
                 # If page no longer exists, break the while loop
                 break_flag = True
-                continue
+                break
 
             # Trim down to specific data chunk
             for row in html.find_all('tr')[3:]:
@@ -223,6 +227,9 @@ class Stock:
 
             page += 1
 
+        message = 'Parsing stock history of {} ({}) :: {} item(s) added.'
+        logging.debug(message.format(self.name, self.code, len(history_list)))
+
         # Return data
         return pd.DataFrame(history_list, columns=['Date',
                                                    'Open',
@@ -239,6 +246,10 @@ def capture(market, top=None):
 
         This function parses current market data, based on its arguments.
 
+        Note:
+            This function will return empty data during 08:00 KST ~ 09:00 KST.
+
+
         Args:
             market      (str):      The market you want to get the data from.
                                     'KOSPI' and 'KOSDAQ' (case insensitive)
@@ -246,6 +257,7 @@ def capture(market, top=None):
             top         (int):      Number of items you want to get from the
                                     top. By default, this function will get all
                                     data.
+
 
         Returns:
             pandas.DataFrame object with the following columns:
@@ -331,3 +343,130 @@ def capture(market, top=None):
                                        'Volume',
                                        'PER',
                                        'ROE'])
+
+
+class Group:
+    """ Class for grouping and handling multiple Stock data
+
+    This class is designed to group and handle multiple stock data at once. It
+    provides various methods which can parse or view data altogether.
+
+    """
+
+    def __init__(self, *args):
+        """
+            Note:
+                This class is designed to accept multi-type arguments as its
+                parameters. You can use <str>, <numpy.ndarray>, or <list> in
+                order to input stock codes. You can also use multiple types
+                of data at once.
+
+
+            Args:
+                code (str):           A code that represents the stock item
+                code (numpy.ndarray): A list that contains stock codes
+                code (list):          A list that contains stock codes
+
+
+        """
+        self.stocks = []
+        self.histories = []
+
+        # Validate multi-type arguments
+        input_codes = []
+        for arg in args:
+            if type(arg) == str:
+                input_codes.append(arg)
+            elif type(arg) == list:
+                for item in arg:
+                    if type(item) != str:
+                        raise TypeError("Invalid datatype.")
+                input_codes += arg
+            elif type(arg) == np.ndarray:
+                input_codes += arg.tolist()
+
+        # Get stock data for each stock and create empty DataFrame
+        self.stocks = [Stock(code) for code in input_codes]
+        empty_df = pd.DataFrame([], columns=[
+            'Rank', 'Code', 'Name', 'Price', 'Change', 'Market Cap',
+            'Volume', 'PER', 'ROE'])
+        self.histories = [empty_df] * len(input_codes)
+
+        # Write debug-level log
+        msg = 'Successfully initialized new <Group> with {} item(s) ({})'
+        logging.debug(msg.format(len(self.stocks), input_codes))
+
+    def __add__(self, other):
+        """ Concatenate two <Group> class objects
+
+            This class allows addition operators between two different
+            <Group> objects.
+
+        """
+
+        # Add data
+        other.stocks = self.stocks + other.stocks
+        other.histories = self.histories + other.histories
+
+        # Write debug-level log
+        msg = 'Successfully merged two <Group> objects with {} item(s) ({})'
+        codes = [stock.code for stock in other.stocks]
+        logging.debug(msg.format(len(other.stocks), codes))
+        return other
+
+    def update_history(self, start_date, end_date):
+        """ Get historical data for every stock in this group
+
+        This method parses historical data of every stock stored in this group
+        based on a range of date.
+
+        Args:
+            start_date  (str):      YYYYDDMM | The first day of the output
+            end_date    (str):      YYYYDDMM | The last day of the output
+
+        """
+
+        for stock in self.stocks:
+            index = self.stocks.index(stock)
+            self.histories[index] = stock.history(start_date, end_date)
+
+    def snapshot(self, date):
+        """ Return snapshot of specific date
+
+            Args:
+                date    (str):      YYYYDDMM | The day you want to look at
+
+            Returns:
+                pandas.DataFrame object with the following columns:
+
+            Date        (object):   Date of each history data
+            Name        (object):   Name of a company
+            Code        (object):   Code of a company
+            Open        (int64):    Open price of the day
+            High        (int64):    Highest price of the day
+            Low         (int64):    Lowest price of the day
+            End         (int64):    End price of the day
+            HL_Gap      (float64):  (High - Low) / Open
+            Change      (float64):  (End - Open) / Open
+            Volume      (int64):    Trade volume of the day
+
+        """
+
+        # Change date format into YYYY-MM-DD
+        try:
+            date = datetime.strptime(str(date), "%Y%m%d")
+            date = date.strftime('%Y-%m-%d')
+        except Exception:
+            raise TypeError('`date` argument must be YYYYDDMM <str>.')
+
+        # Search rows which have the same date
+        df = []
+        for idx in range(len(self.histories)):
+            history = self.histories[idx]
+            history = history[history['Date'] == date]
+            history.insert(1, 'Name', self.stocks[idx].name)
+            history.insert(2, 'Code', self.stocks[idx].code)
+            df.append(history)
+
+        # Return Concatenated DataFrame
+        return pd.concat(df)
