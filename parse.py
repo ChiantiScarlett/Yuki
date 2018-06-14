@@ -1,38 +1,45 @@
 from yuki.error import YukiError
-from urllib.request import urlopen
+from urllib.request import urlopen, quote
 import json
 from bs4 import BeautifulSoup as Soup
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait
 import logging
 from datetime import datetime
+import pandas as pd
 
-THREADPOOL_MAX = 10
+
+def parse_stock_meta(keyword):
+    logging.debug('init :: keyword={}'.format(keyword))
+
+    url_form = "http://ac.finance.naver.com:11002/ac" + \
+               "?q={}&q_enc=euc-kr&st=111&frm=stock&r_format=json" + \
+               "&r_enc=euc-kr&r_unicode=0&t_koreng=1&r_lt=111"
+
+    src = urlopen(url_form.format(quote(keyword))).read().decode('utf-8')
+    candidates = json.loads(src)['items'][0]
+    market_table = {'코스피': 'KOSPI', '코스닥': 'KOSDAQ'}
+    for candidate in candidates:
+        if [keyword] in candidate:
+            code = candidate[0][0]
+            name = candidate[1][0]
+            market = candidate[2][0]
+            logging.debug('return :: <dict> code={}, name={}, market={}'.
+                          format(code, name, market_table[market]))
+            return name, code, market_table[market]
+
+    # If not found, raise error
+    raise YukiError('StockNotFound', keyword=keyword)
 
 
-def parse_current_stat(code):
+def parse_stock_stat(code):
     logging.debug('init :: code={}'.format(code))
     url_form = 'http://api.finance.naver.com/service/itemSummary.nhn?' + \
                'itemcode={code}'
-    src = urlopen(url_form.format(code=code))
-    src = json.loads(src.read().decode('utf-8'))
+    src = urlopen(url_form.format(code=code)).read().decode('utf-8')
+    src = json.loads(src)
 
-    logging.debug('return :: {} ').format(str(type(src)))
+    logging.debug('return :: {} '.format(str(type(src))))
     return src  # Dict-type
-
-
-def parse_name(code):
-    logging.debug('init :: code={}'.format(code))
-
-    url_form = 'http://finance.naver.com/item/main.nhn?code={code}'
-    src = urlopen(url_form.format(code=code))
-    src = Soup(src.read().decode('euc-kr'), 'html.parser')
-    try:
-        title = src.find('title').text.split(':')[0].strip()
-    except Exception:
-        raise YukiError('InvalidStockCode', code=code)
-
-    logging.debug('return :: <{}> ').format(str(type(title)))
-    return title
 
 
 def parse_hist_data(code, start_date=None, end_date=None):
@@ -54,10 +61,11 @@ def parse_hist_data(code, start_date=None, end_date=None):
         raise YukiError('InvalidStockCode', code=code)
 
     # Calculate date difference and set limiter according to the value
-    start_date = datetime.strptime(start_date, '%Y-%m-%d')
     tdelta = (datetime.now() - start_date).days
-
     limiter = int(tdelta * 7 / 5 / 10)  # number of threadpool per loop
+    if limiter == 0:
+        limiter = 1
+
     data = []  # data that holds total data
     pool = []  # thread pool
     start_cursor = 1  # page start
@@ -98,9 +106,24 @@ def parse_hist_data(code, start_date=None, end_date=None):
     while start_date > datetime.strptime(data[0][0], '%Y-%m-%d'):
         data.pop(0)
 
-    return data
+    while end_date < datetime.strptime(data[-1][0], '%Y-%m-%d'):
+        data.pop(-1)
+
+    data.reverse()  # make latest goes top
+    df = pd.DataFrame(data,
+                      columns=['Date',
+                               'End',
+                               'Change',
+                               'Start',
+                               'High',
+                               'Low',
+                               'Volume'
+                               ])
+    # df['Date'] = pd.to_datetime(df['Date'], format='%Y-%m-%d')
+
     logging.debug('return :: {}, {} item(s) '.
                   format(str(type(data)), len(data)))
+    return df
 
 
 def parse_hist_data_by_page(code, page):
