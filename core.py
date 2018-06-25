@@ -26,6 +26,14 @@ class Stock:
                             arg=top,
                             arg_type=str(type(int)))
 
+        # if start_date == None, raise error
+        if not start_date:
+            raise YukiError('InvalidDate', date=start_date)
+
+        # if end_date is None, define end_date as of today
+        if not end_date:
+            end_date = datetime.now().strftime("%Y-%m-%d")
+
         if start_date:
             try:
                 start_date = datetime.strptime(start_date, '%Y-%m-%d')
@@ -56,28 +64,9 @@ class Stock:
     def __add__(self, other):
         return Stocks(self, other)
 
-    def plot(self, indexes=[]):
-        # If empty, show all
-        if not indexes:
-            indexes = ['High', 'End', 'Start', 'Low']
-
-        # If indexes is single string, convert it to list
-        if type(indexes) == str:
-            indexes = [indexes]
-
-        # Capitalize : Make indexes case-insensitive
-        indexes = [x.title() for x in indexes]
-
-        # If indexes are not found on column names, raise error
-        possible_indexes = list(self.hist)
-        possible_indexes.remove('Date')
-        if not set(indexes) < set(possible_indexes):
-            raise YukiError('InvalidArgument', arg='indexes',
-                            description='Possible indexes are {}'
-                            .format(str(possible_indexes)))
-
-        # Plot stock
-        plot_stock(self.hist, indexes)
+    def plot(self, index=['High', 'End', 'Start', 'Low'],
+             start=None, end=None):
+        plot_stock(self.name, self.hist, index, start, end)
 
 
 class Stocks:
