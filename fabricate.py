@@ -10,6 +10,9 @@ from yuki.error import YukiError
 
 def plot_stock(stock_name, df, index, start_date, end_date):
 
+    font = {'family': 'NanumGothic'}
+    mpl.rc('font', **font)
+
     # If index is single string, convert it to list
     if type(index) == str:
         index = [index]
@@ -83,5 +86,7 @@ def plot_stock(stock_name, df, index, start_date, end_date):
         mpl.ticker.FuncFormatter(lambda x, p: format(int(x), ',')))
 
     plt.legend(loc='best', fancybox=True, framealpha=0.5)
-    plt.title(stock_name)
+    plt.title(stock_name.encode('utf-8').decode('utf-8'))
+
+    print(stock_name)
     plt.show()
