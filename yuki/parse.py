@@ -42,7 +42,7 @@ def parse_stock_stat(code):
     return src  # Dict-type
 
 
-def parse_hist_data(code, start_date, end_date):
+def parse_stock_data(code, start_date, end_date):
     logging.debug('init :: code={}, start_date={}, end_date={}'.
                   format(code, start_date, end_date))
 

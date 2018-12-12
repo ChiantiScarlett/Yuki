@@ -15,38 +15,47 @@ class Stock:
         # Validate code
         self.name, self.code, self.market = parse_stock_meta(keyword)
         self.stat = parse_stock_stat(self.code)
-        self.hist = pd.DataFrame()  # empty dataframe
+        self.df = pd.DataFrame()  # empty dataframe
         logging.debug('<Stock> initialized :: {}({})'.
                       format(self.name, self.code))
 
-    def load_hist(self, start_date=None, end_date=None, top=10):
+    def load(self, start=None, end=None, top=10):
+        """
+        This method loads data, based on the following parameters:
+        -----------------------------------------------------------------------
+        Argument | Type  | Description
+        -----------------------------------------------------------------------
+        start    | <str> | 'YYYY-MM-DD' : Starting date ('Optional')
+        end      | <str> | 'YYYY-MM-DD' : End date
+        top      | <int> | Number of items
+        """
         # Validate Option
         if type(top) != int:
             raise YukiError('InvalidArgType',
                             arg=top,
                             arg_type=str(type(int)))
 
-        # if start_date == None, raise error
-        if not start_date:
-            raise YukiError('InvalidDate', date=start_date)
+        # if start == None, raise error
+        if not start:
+            raise YukiError('InvalidDate', date=start)
 
-        # if end_date is None, define end_date as of today
-        if not end_date:
-            end_date = datetime.now().strftime("%Y-%m-%d")
+        # if end is None, define end as of today
+        if not end:
+            end = datetime.now().strftime("%Y-%m-%d")
 
-        if start_date:
+        if start:
             try:
-                start_date = datetime.strptime(start_date, '%Y-%m-%d')
+                start = datetime.strptime(start, '%Y-%m-%d')
             except Exception:
-                raise YukiError('InvalidDate', date=start_date)
-        if end_date:
+                raise YukiError('InvalidDate', date=start)
+        if end:
             try:
-                end_date = datetime.strptime(end_date, '%Y-%m-%d')
+                end = datetime.strptime(end, '%Y-%m-%d')
             except Exception:
-                raise YukiError('InvalidDate', date=end_date)
+                raise YukiError('InvalidDate', date=end)
 
         # Load data
-        self.hist = parse_hist_data(self.code, start_date, end_date)
+        self.df = parse_hist_data(self.code, start, end)
 
     def __str__(self):
         return ("""
@@ -55,44 +64,6 @@ class Stock:
                                code=self.code,
                                market=self.market))
 
-    def hist_to_xlsx(self, path):
-        print('to_xlsx -> {}'.format(path))
-
-    def hist_to_csv(self, path):
-        print('to_csv -> {}'.format(path))
-
-    def __add__(self, other):
-        return Stocks(self, other)
-
     def plot(self, index=['High', 'End', 'Start', 'Low'],
              start=None, end=None):
-        plot_stock(self.name, self.hist, index, start, end)
-
-
-class Stocks:
-    def __init__(self, *args):
-        self.names = []
-        self.codes = []
-        self.items = []
-
-        self.add_stock(args)
-
-    def add_stock(self, args):
-        for item in args:
-            # Raise error if not valid
-            if type(item) != Stock:
-                raise YukiError('InvalidStock', arg=item)
-
-            # Add item
-            self.names.append(item.name)
-            self.codes.append(item.code)
-            self.items.append(item)
-
-    def append(self):
-        pass
-
-    def pop(self):
-        pass
-
-    def index(self):
-        pass
+        plot_stock(self.name, self.df, index, start, end)
